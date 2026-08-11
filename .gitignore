@@ -1,0 +1,81 @@
+# Python Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment and Secret configuration
+.env
+.env.local
+.env.*.local
+
+# Testing, type checking, and linting caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.nox/
+.tox/
+
+# IDE and Editor configurations
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Datasets, Storage & Local Vector DBs
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/evaluation/*
+!data/evaluation/.gitkeep
+vector_db/
+qdrant_storage/
+chroma_db/
+faiss_index/
+*.sqlite3
+*.db
+
+# Model Caches and Large Local Files
+.cache/
+huggingface/
+torch/
+models/
+*.bin
+*.onnx
+*.safetensors
+*.pt
+*.pth
+
+# Temporary and Build Files
+tmp/
+temp/
+*.log
+*.tmp
+*.bak
+dist/
+build/
+*.egg-info/
