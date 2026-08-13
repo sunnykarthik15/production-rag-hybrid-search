@@ -57,6 +57,9 @@ data/processed/*
 data/evaluation/*
 !data/evaluation/.gitkeep
 !data/evaluation/questions.jsonl
+data/vector_store/
+results/*.json
+!results/.gitkeep
 vector_db/
 qdrant_storage/
 chroma_db/
