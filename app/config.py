@@ -62,6 +62,12 @@ MIN_TOP_K: int = 1
 #: Absolute maximum value for top_k (prevents accidental full-corpus scans).
 MAX_TOP_K: int = 150
 
+#: Default Reciprocal Rank Fusion (RRF) smoothing parameter.
+DEFAULT_RRF_K: int = 60
+
+#: Default candidate retrieval depth for hybrid retrieval components before RRF.
+DEFAULT_HYBRID_CANDIDATE_K: int = 50
+
 
 # ---------------------------------------------------------------------------
 # Results directory

@@ -220,5 +220,85 @@ Run BM25 retrieval against the 150 evaluation questions and compute Recall@1/3/5
 python scripts/evaluate_bm25_retrieval.py
 ```
 
+---
 
+## Phase 4: Reciprocal Rank Fusion (RRF) & Hybrid Search
 
+Phase 4 integrates Dense Vector Retrieval (`DenseRetrievalService`) and BM25 Lexical Retrieval (`BM25RetrievalService`) into a unified **Hybrid Search Pipeline** (`HybridRetrievalService`).
+
+```
+                              ┌────────────────────────┐
+                              │    Input Query Text    │
+                              └───────────┬────────────┘
+                                          │
+                    ┌─────────────────────┴─────────────────────┐
+                    ▼                                           ▼
+      ┌───────────────────────────┐               ┌───────────────────────────┐
+      │   Dense Vector Search     │               │   BM25 Lexical Search     │
+      │  (all-MiniLM-L6-v2/FAISS) │               │   (rank-bm25 / Okapi)     │
+      └─────────────┬─────────────┘               └─────────────┬─────────────┘
+                    │ (candidate_k=50)                          │ (candidate_k=50)
+                    ▼                                           ▼
+            [ Dense Ranks ]                             [ BM25 Ranks ]
+                    └─────────────────────┬─────────────────────┘
+                                          │
+                                          ▼
+                              ┌────────────────────────┐
+                              │ Reciprocal Rank Fusion │
+                              │     (rrf_k = 60)       │
+                              └───────────┬────────────┘
+                                          │
+                                          ▼
+                              ┌────────────────────────┐
+                              │  Top-K Hybrid Results  │
+                              └────────────────────────┘
+```
+
+### Reciprocal Rank Fusion (RRF) Algorithm
+
+Reciprocal Rank Fusion (RRF) is an unsupervised rank aggregation method that combines multiple ranked result lists into a single unified output ranking.
+
+#### RRF Formula
+
+For each candidate text chunk $d$ in the candidate pool:
+
+$$RRF\_Score(d) = \sum_{m \in \{Dense, BM25\}} \frac{1}{k_{rrf} + rank_m(d)}$$
+
+Where:
+- $rank_m(d)$ is the 1-based rank position of chunk $d$ in retrieval system $m$.
+- $k_{rrf}$ is the smoothing hyperparameter (default = `60`).
+- If chunk $d$ is missing from system $m$'s candidate list, its reciprocal rank contribution for that system is $0$.
+
+#### Key Parameters
+
+* **`candidate_k`** (default: `50`): The depth of candidate results fetched from both Dense and BM25 sub-services prior to fusion. Retrieving a deep candidate pool ensures relevant items ranked slightly lower in one sub-service are not prematurely lost before fusion.
+* **`top_k`** (default: `10`): The final requested count of fused hybrid results returned to the caller.
+* **`rrf_k`** (default: `60`): The smoothing constant balancing high-ranked versus lower-ranked candidates.
+
+#### Why Raw Dense and BM25 Scores Are NOT Directly Combined
+
+Raw similarity scores from Dense retrieval (Cosine Similarity in $[-1.0, 1.0]$) and BM25 retrieval (unbounded positive score in $[0.0, \infty)$) live on completely different mathematical scales and distributions. Directly summing or averaging raw scores would heavily bias results toward BM25 score magnitudes. RRF operates **purely on rank positions**, making it completely scale-invariant, robust against score distribution differences, and parameter-free regarding system weight tuning.
+
+### Key Component
+
+* **Hybrid Retrieval Service**: `HybridRetrievalService` in `app/retrieval/hybrid_service.py`
+  * Public interface: `retrieve(query, top_k=10, rrf_k=60, candidate_k=50) -> RetrievalResponse`
+  * Deterministic tie-breaking on `chunk_id` ascending.
+
+### Command
+
+**Evaluate Hybrid Retrieval**
+
+Run hybrid retrieval against all 150 evaluation questions and compute Recall@1/3/5/10 and MRR:
+
+```bash
+python scripts/evaluate_hybrid_retrieval.py
+```
+
+### Benchmark Metric Results Across All Phases
+
+| Retrieval Pipeline | Recall@1 | Recall@3 | Recall@5 | Recall@10 | MRR |
+|---|---|---|---|---|---|
+| **Phase 2 — Dense Vector Search** | 0.1840 (18.40%) | 0.5520 (55.20%) | 0.6480 (64.80%) | 0.7840 (78.40%) | 0.3808 |
+| **Phase 3 — BM25 Lexical Search** | 0.4160 (41.60%) | 0.7920 (79.20%) | 0.9200 (92.00%) | 1.0000 (100.00%) | 0.6209 |
+| **Phase 4 — Hybrid Search (RRF)** | **0.2560 (25.60%)** | **0.6960 (69.60%)** | **0.8400 (84.00%)** | **0.9840 (98.40%)** | **0.5001** |
