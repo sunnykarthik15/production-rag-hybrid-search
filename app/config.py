@@ -68,6 +68,12 @@ DEFAULT_RRF_K: int = 60
 #: Default candidate retrieval depth for hybrid retrieval components before RRF.
 DEFAULT_HYBRID_CANDIDATE_K: int = 50
 
+#: Hugging Face cross-encoder model name for Phase 5 reranking.
+RERANKER_MODEL_NAME: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+#: Default number of hybrid candidate chunks to fetch before reranking.
+DEFAULT_RERANK_CANDIDATE_K: int = 30
+
 
 # ---------------------------------------------------------------------------
 # Results directory

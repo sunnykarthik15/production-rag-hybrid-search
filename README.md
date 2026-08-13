@@ -301,4 +301,82 @@ python scripts/evaluate_hybrid_retrieval.py
 |---|---|---|---|---|---|
 | **Phase 2 — Dense Vector Search** | 0.1840 (18.40%) | 0.5520 (55.20%) | 0.6480 (64.80%) | 0.7840 (78.40%) | 0.3808 |
 | **Phase 3 — BM25 Lexical Search** | 0.4160 (41.60%) | 0.7920 (79.20%) | 0.9200 (92.00%) | 1.0000 (100.00%) | 0.6209 |
-| **Phase 4 — Hybrid Search (RRF)** | **0.2560 (25.60%)** | **0.6960 (69.60%)** | **0.8400 (84.00%)** | **0.9840 (98.40%)** | **0.5001** |
+| **Phase 4 — Hybrid Search (RRF)** | 0.2560 (25.60%) | 0.6960 (69.60%) | 0.8400 (84.00%) | 0.9840 (98.40%) | 0.5001 |
+
+---
+
+## Phase 5: Cross-Encoder Reranking
+
+Phase 5 introduces second-stage **Cross-Encoder Reranking** (`RerankerService` and `RerankedHybridService`) on top of Phase 4 Hybrid Search.
+
+```
+                              ┌────────────────────────┐
+                              │    Input Query Text    │
+                              └───────────┬────────────┘
+                                          │
+                    ┌─────────────────────┴─────────────────────┐
+                    ▼                                           ▼
+      ┌───────────────────────────┐               ┌───────────────────────────┐
+      │   Dense Vector Search     │               │   BM25 Lexical Search     │
+      │  (all-MiniLM-L6-v2/FAISS) │               │   (rank-bm25 / Okapi)     │
+      └─────────────┬─────────────┘               └─────────────┬─────────────┘
+                    │                                           │
+                    └─────────────────────┬─────────────────────┘
+                                          │
+                                          ▼
+                              ┌────────────────────────┐
+                              │ Reciprocal Rank Fusion │
+                              │   (RRF Candidate Pool) │
+                              └───────────┬────────────┘
+                                          │ (candidate_k=30)
+                                          ▼
+                              ┌────────────────────────┐
+                              │ Cross-Encoder Reranker │
+                              │ (ms-marco-MiniLM-L-6)  │
+                              └───────────┬────────────┘
+                                          │
+                                          ▼
+                              ┌────────────────────────┐
+                              │ Final Top-K Results    │
+                              └────────────────────────┘
+```
+
+### Architecture & Key Principles
+
+1. **Two-Stage Pipeline**:
+   - **Stage 1 (Retrieval)**: Dense Vector Search and BM25 Lexical Search independently retrieve candidates, fused via Reciprocal Rank Fusion (RRF) into a candidate pool (`candidate_k=30`).
+   - **Stage 2 (Reranking)**: A Cross-Encoder model (`cross-encoder/ms-marco-MiniLM-L-6-v2`) evaluates joint attention over pairs `(query, text)`, outputting deep relevance logit scores.
+2. **Model Choice**:
+   - Model: `cross-encoder/ms-marco-MiniLM-L-6-v2` (6 transformer layers, ~22M parameters, ~80MB footprint).
+   - CPU-friendly, fast inference sub-100ms per batch of 30 candidate pairs.
+3. **Data Representation**:
+   - Evaluates pair `(query, f"{title}: {text}")` to leverage document context.
+   - Deterministic tie-breaking on `chunk_id` ascending when Cross-Encoder scores match.
+
+### Key Components
+
+* **Reranker Service**: `RerankerService` in `app/reranking/service.py`
+  * Wraps `sentence_transformers.CrossEncoder`.
+  * Public interface: `rerank(query, candidates, top_k=10) -> RetrievalResponse`
+* **Reranked Hybrid Service**: `RerankedHybridService` in `app/reranking/hybrid_reranker.py`
+  * Public interface: `retrieve(query, top_k=10, rrf_k=60, candidate_k=30) -> RetrievalResponse`
+
+### Command
+
+**Evaluate Reranked Hybrid Retrieval**
+
+Run Reranked Hybrid search against all 150 evaluation questions and compute Recall@1/3/5/10 and MRR:
+
+```bash
+python scripts/evaluate_reranked_hybrid.py
+```
+
+### Complete Benchmark Comparison Across All Phases
+
+| Retrieval Pipeline | Recall@1 | Recall@3 | Recall@5 | Recall@10 | MRR |
+|---|---|---|---|---|---|
+| **Phase 2 — Dense Vector Search** | 0.1840 (18.40%) | 0.5520 (55.20%) | 0.6480 (64.80%) | 0.7840 (78.40%) | 0.3808 |
+| **Phase 3 — BM25 Lexical Search** | 0.4160 (41.60%) | 0.7920 (79.20%) | 0.9200 (92.00%) | 1.0000 (100.00%) | 0.6209 |
+| **Phase 4 — Hybrid Search (RRF)** | 0.2560 (25.60%) | 0.6960 (69.60%) | 0.8400 (84.00%) | 0.9840 (98.40%) | 0.5001 |
+| **Phase 5 — Reranked Hybrid (Cross-Encoder)** | **0.4720 (47.20%)** | **1.0000 (100.00%)** | **1.0000 (100.00%)** | **1.0000 (100.00%)** | **0.6920** |
+
