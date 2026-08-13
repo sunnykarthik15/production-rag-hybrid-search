@@ -1,0 +1,11 @@
+{
+  "document_id": "DOC012",
+  "title": "Nexora Campus Operations Manual \u2014 Library Module 12",
+  "department": "Library",
+  "topic": "library services",
+  "owner": "Library Operations Team",
+  "module_code": "NX-LIB-111",
+  "text": "1. Purpose: This module defines operating rules for library services within the Nexora Smart Campus. The responsible owner is the Library Operations Team. Module identifier NX-LIB-111.\n\n2. Service hours: Routine library services requests are handled from 07:30-16:30. Requests submitted outside that window are queued for the next service period unless they are marked critical. The standard response SLA is 24 hours.\n\n3. Capacity and thresholds: The monitored unit has a nominal service capacity of 70 concurrent users. When the utilization indicator reaches 95 percent, the dashboard must mark the unit as approaching capacity. At 95 percent utilization, the responsible team must review the queue.\n\n4. Escalation: If a critical incident remains unresolved for 30 minutes, it is escalated to the Operations Lead. Critical incidents are those that prevent the core service from operating or create an immediate safety or security concern.\n\n5. Records: Every operational event must contain a timestamp, module identifier NX-LIB-111, severity, assigned owner, action taken, and closure status. Records are retained for 180 days.\n\n6. Exception handling: Planned maintenance may temporarily suspend routine requests. Maintenance notices should be published at least 24 hours before the planned interruption. Emergency maintenance can be announced immediately when necessary.\n\n7. Audit rule: A monthly review checks response SLA compliance, unresolved incidents, capacity alerts, and whether required event fields were recorded. The Library Operations Team signs off the monthly review.",
+  "source": "Nexora Synthetic Operations Corpus",
+  "version": "1.0"
+}

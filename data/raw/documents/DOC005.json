@@ -1,0 +1,11 @@
+{
+  "document_id": "DOC005",
+  "title": "Nexora Campus Operations Manual \u2014 IT Services Module 05",
+  "department": "IT Services",
+  "topic": "IT support",
+  "owner": "IT Services Operations Team",
+  "module_code": "NX-ITS-104",
+  "text": "1. Purpose: This module defines operating rules for IT support within the Nexora Smart Campus. The responsible owner is the IT Services Operations Team. Module identifier NX-ITS-104.\n\n2. Service hours: Routine IT support requests are handled from 09:00-18:00. Requests submitted outside that window are queued for the next service period unless they are marked critical. The standard response SLA is 4 hours.\n\n3. Capacity and thresholds: The monitored unit has a nominal service capacity of 80 concurrent users. When the utilization indicator reaches 90 percent, the dashboard must mark the unit as approaching capacity. At 95 percent utilization, the responsible team must review the queue.\n\n4. Escalation: If a critical incident remains unresolved for 30 minutes, it is escalated to the Duty Manager. Critical incidents are those that prevent the core service from operating or create an immediate safety or security concern.\n\n5. Records: Every operational event must contain a timestamp, module identifier NX-ITS-104, severity, assigned owner, action taken, and closure status. Records are retained for 180 days.\n\n6. Exception handling: Planned maintenance may temporarily suspend routine requests. Maintenance notices should be published at least 24 hours before the planned interruption. Emergency maintenance can be announced immediately when necessary.\n\n7. Audit rule: A monthly review checks response SLA compliance, unresolved incidents, capacity alerts, and whether required event fields were recorded. The IT Services Operations Team signs off the monthly review.",
+  "source": "Nexora Synthetic Operations Corpus",
+  "version": "1.0"
+}

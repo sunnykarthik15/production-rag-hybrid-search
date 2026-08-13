@@ -48,10 +48,15 @@ Desktop.ini
 # Datasets, Storage & Local Vector DBs
 data/raw/*
 !data/raw/.gitkeep
+!data/raw/documents.jsonl
+!data/raw/documents/
+!data/raw/documents/DOC*.json
 data/processed/*
 !data/processed/.gitkeep
+!data/processed/chunks.jsonl
 data/evaluation/*
 !data/evaluation/.gitkeep
+!data/evaluation/questions.jsonl
 vector_db/
 qdrant_storage/
 chroma_db/
