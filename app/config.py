@@ -76,6 +76,27 @@ DEFAULT_RERANK_CANDIDATE_K: int = 30
 
 
 # ---------------------------------------------------------------------------
+# Phase 6: LLM Generation & RAG Orchestration
+# ---------------------------------------------------------------------------
+
+#: LLM provider identifier ("mock", "openai").
+LLM_PROVIDER: str = "mock"
+
+#: Model name for generation provider.
+LLM_MODEL_NAME: str = "gpt-3.5-turbo"
+
+#: Sampling temperature for LLM generation (0.0 for deterministic output).
+LLM_TEMPERATURE: float = 0.0
+
+#: Maximum tokens allowed in generated output completion.
+LLM_MAX_TOKENS: int = 512
+
+#: Minimum Cross-Encoder reranker relevance score threshold for evidence sufficiency.
+#: Scores below this threshold trigger an insufficient-information response.
+RAG_MIN_RELEVANCE_SCORE: float = 0.0
+
+
+# ---------------------------------------------------------------------------
 # Results directory
 # ---------------------------------------------------------------------------
 

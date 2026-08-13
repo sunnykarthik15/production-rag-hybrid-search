@@ -380,3 +380,86 @@ python scripts/evaluate_reranked_hybrid.py
 | **Phase 4 — Hybrid Search (RRF)** | 0.2560 (25.60%) | 0.6960 (69.60%) | 0.8400 (84.00%) | 0.9840 (98.40%) | 0.5001 |
 | **Phase 5 — Reranked Hybrid (Cross-Encoder)** | **0.4720 (47.20%)** | **1.0000 (100.00%)** | **1.0000 (100.00%)** | **1.0000 (100.00%)** | **0.6920** |
 
+---
+
+## Phase 6: LLM Generation & RAG Orchestration
+
+Phase 6 connects the Reranked Hybrid Search pipeline (`RerankedHybridService`) with a grounded LLM Generation Service (`GenerationService`) into an end-to-end RAG Orchestrator (`RAGService`).
+
+```
+                              ┌────────────────────────┐
+                              │    User Query Text     │
+                              └───────────┬────────────┘
+                                          │
+                                          ▼
+                              ┌────────────────────────┐
+                              │ Reranked Hybrid Search │
+                              │ (Dense + BM25 + Cross) │
+                              └───────────┬────────────┘
+                                          │
+                                          ▼
+                              ┌────────────────────────┐
+                              │ Top-K Citation Chunks  │
+                              └───────────┬────────────┘
+                                          │
+                                          ▼
+                              ┌────────────────────────┐
+                              │ Context Builder Prompt │
+                              │   (prompts.py)         │
+                              └───────────┬────────────┘
+                                          │
+                                          ▼
+                              ┌────────────────────────┐
+                              │ LLM Provider           │
+                              │ (Mock / OpenAI API)    │
+                              └───────────┬────────────┘
+                                          │
+                                          ▼
+                              ┌────────────────────────┐
+                              │ RAG Response           │
+                              │ (Grounded Answer       │
+                              │  + Source Citations)   │
+                              └────────────────────────┘
+```
+
+### Architecture & Grounded Generation Rules
+
+1. **Vendor-Agnostic LLM Provider Abstraction (`LLMProvider`)**:
+   - `MockLLMProvider`: Deterministic offline provider used for automated tests and offline benchmark evaluation.
+   - `OpenAILLMProvider`: Live API provider supporting OpenAI / OpenAI-compatible REST endpoints via standard Python HTTP requests (zero mandatory external vendor SDK lock-in).
+2. **Grounded Prompt Guidelines**:
+   - Answers queries strictly using the provided context chunks.
+   - Never hallucinates, assumes, or extrapolates facts outside the retrieved evidence.
+   - Explicitly returns `"I do not have sufficient information in the provided context to answer this question."` when evidence is missing or context is empty.
+3. **Structured Citation Response (`RAGResponse`)**:
+   - Contains query, grounded answer text, and structured evidence citations (`RAGSource` objects with `chunk_id`, `document_id`, `title`, `department`, `rank`, and `score`).
+
+### Key Components
+
+* **Generation Models**: `GenerationRequest`, `GenerationResponse` in `app/generation/models.py`
+* **Prompt Engineering**: `SYSTEM_PROMPT`, `format_context_block`, `build_grounded_prompt` in `app/generation/prompts.py`
+* **Generation Service**: `GenerationService`, `LLMProvider`, `MockLLMProvider`, `OpenAILLMProvider` in `app/generation/service.py`
+* **RAG Orchestrator**: `RAGService`, `RAGResponse`, `RAGSource` in `app/rag/service.py` and `app/rag/models.py`
+
+### Configuration Settings
+
+Set environment variables or edit `app/config.py`:
+
+```bash
+# Enable live OpenAI API (optional, defaults to offline mock provider)
+export LLM_PROVIDER="openai"
+export OPENAI_API_KEY="your-api-key-here"
+```
+
+### Commands
+
+**Run End-to-End RAG Benchmark Evaluation**
+
+Evaluate the 150-question benchmark through the complete RAG orchestration pipeline:
+
+```bash
+python scripts/evaluate_rag.py
+```
+
+| **Phase 5 — Reranked Hybrid (Cross-Encoder)** | **0.4720 (47.20%)** | **1.0000 (100.00%)** | **1.0000 (100.00%)** | **1.0000 (100.00%)** | **0.6920** |
+
