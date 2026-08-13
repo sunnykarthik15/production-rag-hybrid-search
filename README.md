@@ -186,4 +186,39 @@ Run dense vector retrieval against the 150 evaluation questions and compute Reca
 python scripts/evaluate_dense_retrieval.py
 ```
 
+---
+
+## Phase 3: BM25 Lexical Retrieval
+
+BM25 (Best Matching 25) is an inverse document frequency (IDF)-weighted probabilistic lexical retrieval algorithm. It scores relevance based on exact keyword occurrences, term frequencies, and document lengths.
+
+### Key Differences & Why Both Dense and Lexical Are Needed
+
+| Retrieval Technique | Core Mechanism | Strengths | Weaknesses |
+|---|---|---|---|
+| **Dense Vector Retrieval** | Continuous embedding space (`all-MiniLM-L6-v2`) | Captures **semantic similarity**, paraphrases, conceptual meaning, and multi-word intent. | Can fail on exact technical codes, serial numbers, rare codes, or specialized acronyms. |
+| **BM25 Lexical Retrieval** | Probabilistic term matching (`rank-bm25`) | Exceptional at **exact keyword matching**, module identifiers (e.g. `NX-FAC-100`), numbers, and exact technical terminology. | Misses semantic synonyms or rephrased queries that do not share exact terms with documents. |
+
+**Why Hybrid Search is Required:**
+Dense retrieval excels when queries ask about general concepts ("operating schedule"), while BM25 excels when queries contain exact alphanumeric codes or rare terms ("NX-FAC-100"). Combining both via Reciprocal Rank Fusion (RRF) provides optimal recall across all query categories.
+
+### Key Components
+
+* **Lexical Index & Tokenization**: `BM25Store` in `app/retrieval/bm25_store.py`
+  * Deterministic regex tokenization preserving numbers, terms, and hyphenated technical identifiers (e.g. `NX-FAC-100`).
+  * Built using `rank-bm25` (`BM25Okapi`).
+* **Retrieval Service**: `BM25RetrievalService` in `app/retrieval/bm25_service.py`
+  * Provides `search(query, top_k)` returning structured `RetrievalResponse` models.
+
+### Command
+
+**Evaluate BM25 Retrieval**
+
+Run BM25 retrieval against the 150 evaluation questions and compute Recall@1/3/5/10 and MRR:
+
+```bash
+python scripts/evaluate_bm25_retrieval.py
+```
+
+
 
