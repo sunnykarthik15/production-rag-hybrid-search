@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
+from app.citations.service import CitationVerificationService
 from app.config import (
     DEFAULT_TOP_K,
     MAX_TOP_K,
@@ -33,12 +34,13 @@ class RAGError(Exception):
 
 
 class RAGService:
-    """Orchestrates Reranked Hybrid Search and grounded LLM Generation."""
+    """Orchestrates Reranked Hybrid Search, grounded LLM Generation, and Citation Verification."""
 
     def __init__(
         self,
         hybrid_reranker: Optional[RerankedHybridService] = None,
         generation_service: Optional[GenerationService] = None,
+        citation_service: Optional[CitationVerificationService] = None,
         min_relevance_score: Optional[float] = None,
     ) -> None:
         """Initialize RAGService container.
@@ -49,12 +51,15 @@ class RAGService:
             Service executing hybrid retrieval and cross-encoder reranking.
         generation_service : GenerationService, optional
             Service executing grounded prompt generation.
+        citation_service : CitationVerificationService, optional
+            Service executing post-generation citation verification and groundedness checks.
         min_relevance_score : float, optional
             Minimum Cross-Encoder relevance score required to consider evidence sufficient.
             Defaults to configured RAG_MIN_RELEVANCE_SCORE.
         """
         self.hybrid_reranker = hybrid_reranker or RerankedHybridService()
         self.generation_service = generation_service or GenerationService()
+        self.citation_service = citation_service or CitationVerificationService()
         self.min_relevance_score = (
             min_relevance_score
             if min_relevance_score is not None
@@ -75,7 +80,7 @@ class RAGService:
             raise RAGError(f"Failed to initialize RAG retrieval components: {exc}") from exc
 
     def answer(self, query: str, top_k: int = DEFAULT_TOP_K) -> RAGResponse:
-        """Execute complete RAG pipeline: Query -> Reranked Retrieval -> Prompt -> Answer + Sources.
+        """Execute complete RAG pipeline: Query -> Reranked Retrieval -> Prompt -> Answer + Sources + Verification.
 
         Parameters
         ----------
@@ -87,7 +92,7 @@ class RAGService:
         Returns
         -------
         RAGResponse
-            Structured response containing query, grounded answer text, and evidence citations.
+            Structured response containing query, grounded answer text, evidence citations, and verification report.
 
         Raises
         ------
@@ -113,10 +118,15 @@ class RAGService:
         # 2. Evidence Sufficiency Evaluation
         # Empty retrieval or top relevance score below min_relevance_score threshold
         if not retrieval_response.results:
+            verification = self.citation_service.verify(
+                clean_query, INSUFFICIENT_INFO_ANSWER, sources=[]
+            )
             return RAGResponse(
                 query=clean_query,
                 answer=INSUFFICIENT_INFO_ANSWER,
                 sources=[],
+                verification=verification,
+                groundedness_score=1.0,
             )
 
         top_score = retrieval_response.results[0].similarity_score
@@ -125,13 +135,18 @@ class RAGService:
                 f"Top evidence score ({top_score:.4f}) below threshold ({self.min_relevance_score:.4f}). "
                 "Returning grounded insufficient information response without invoking LLM."
             )
+            verification = self.citation_service.verify(
+                clean_query, INSUFFICIENT_INFO_ANSWER, sources=[]
+            )
             return RAGResponse(
                 query=clean_query,
                 answer=INSUFFICIENT_INFO_ANSWER,
                 sources=[],
+                verification=verification,
+                groundedness_score=1.0,
             )
 
-        # Map RetrievalResult items to RAGSource citation objects
+        # Map RetrievalResult items to RAGSource citation objects (preserving chunk text)
         sources: List[RAGSource] = [
             RAGSource(
                 chunk_id=item.chunk_id,
@@ -140,6 +155,7 @@ class RAGService:
                 department=item.department,
                 rank=item.rank,
                 score=item.similarity_score,
+                text=item.text,
             )
             for item in retrieval_response.results
         ]
@@ -153,8 +169,24 @@ class RAGService:
         except (GenerationError, Exception) as exc:
             raise RAGError(f"Generation step failed during RAG orchestration: {exc}") from exc
 
+        # 5. Execute Post-Generation Citation Verification
+        try:
+            verification = self.citation_service.verify(
+                clean_query, gen_response.answer, sources=sources
+            )
+        except Exception as exc:
+            logger.warning(f"Citation verification failed: {exc}")
+            verification = None
+
+        groundedness_score = (
+            verification.claim_groundedness_rate if verification is not None else None
+        )
+
         return RAGResponse(
             query=clean_query,
             answer=gen_response.answer,
             sources=sources,
+            verification=verification,
+            groundedness_score=groundedness_score,
         )
+

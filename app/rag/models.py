@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.citations.models import CitationVerificationResult
 from app.config import DEFAULT_TOP_K, MAX_TOP_K, MIN_TOP_K
 
 
@@ -18,6 +19,9 @@ class RAGSource(BaseModel):
     department: str = Field(..., description="Associated department.")
     rank: int = Field(..., ge=1, description="1-based rank position in reranked search results.")
     score: float = Field(..., description="Relevance score assigned to chunk by reranker.")
+    text: Optional[str] = Field(
+        default=None, description="Raw chunk text content preserved for citation verification."
+    )
 
     @field_validator("chunk_id", "document_id", "title")
     @classmethod
@@ -42,12 +46,18 @@ class RAGRequest(BaseModel):
 
 
 class RAGResponse(BaseModel):
-    """End-to-end response container containing grounded answer and source citations."""
+    """End-to-end response container containing grounded answer, source citations, and verification."""
 
     query: str = Field(..., description="Original user query.")
     answer: str = Field(..., description="Grounded natural language answer.")
     sources: List[RAGSource] = Field(
         default_factory=list, description="Ordered list of evidence sources used for generation."
+    )
+    verification: Optional[CitationVerificationResult] = Field(
+        default=None, description="Phase 7 citation verification and groundedness analysis."
+    )
+    groundedness_score: Optional[float] = Field(
+        default=None, description="Overall groundedness score (0.0 to 1.0)."
     )
 
     @field_validator("query", "answer")
@@ -56,3 +66,4 @@ class RAGResponse(BaseModel):
         if not v or not v.strip():
             raise ValueError("Field must not be empty.")
         return v.strip()
+

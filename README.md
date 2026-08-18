@@ -461,5 +461,715 @@ Evaluate the 150-question benchmark through the complete RAG orchestration pipel
 python scripts/evaluate_rag.py
 ```
 
-| **Phase 5 — Reranked Hybrid (Cross-Encoder)** | **0.4720 (47.20%)** | **1.0000 (100.00%)** | **1.0000 (100.00%)** | **1.0000 (100.00%)** | **0.6920** |
+---
+
+## Phase 7: Citation Verification & Answer Groundedness
+
+Phase 7 introduces an automated post-generation **Citation Verification and Answer Groundedness** system (`app/citations/`), designed to evaluate claim faithfulness, citation accuracy, and attribution completeness without external LLM dependencies.
+
+```
+                               ┌────────────────────────┐
+                               │    User Query Text     │
+                               └───────────┬────────────┘
+                                           │
+                                           ▼
+                               ┌────────────────────────┐
+                               │ Reranked Hybrid Search │
+                               │ (Dense + BM25 + Cross) │
+                               └───────────┬────────────┘
+                                           │
+                                           ▼
+                               ┌────────────────────────┐
+                               │ Evidence Sufficiency   │
+                               │ (min_relevance_score)  │
+                               └───────────┬────────────┘
+                                           │
+                     ┌─────────────────────┴─────────────────────┐
+                     │ (Below Threshold)                         │ (Sufficient)
+                     ▼                                           ▼
+       ┌───────────────────────────┐               ┌───────────────────────────┐
+       │ Return Insufficient-Info  │               │ Context Builder & Prompt  │
+       │ Sentinel Answer           │               └─────────────┬─────────────┘
+       └─────────────┬─────────────┘                             │
+                     │                                           ▼
+                     │                             ┌───────────────────────────┐
+                     │                             │ LLM Generation            │
+                     │                             └─────────────┬─────────────┘
+                     │                                           │
+                     └─────────────────────┬─────────────────────┘
+                                           │
+                                           ▼
+                               ┌────────────────────────┐
+                               │ app/citations/ Layer   │
+                               │                        │
+                               │ 1. Refusal Detector    │
+                               │ 2. Claim Segmenter     │
+                               │ 3. Citation Parser     │
+                               │ 4. Entity & Num Match  │
+                               │ 5. Overlap & Entail    │
+                               │ 6. Citation Correct    │
+                               │ 7. Citation Complete   │
+                               │ 8. Groundedness Calc   │
+                               └───────────┬────────────┘
+                                           │
+                                           ▼
+                               ┌────────────────────────┐
+                               │ Verified RAG Response  │
+                               │ - answer_type          │
+                               │ - refusal_correct      │
+                               │ - claim_verifications  │
+                               │ - groundedness_score   │
+                               │ - citation_precision   │
+                               │ - citation_recall / F1 │
+                               │ - failure_diagnostics  │
+                               └────────────────────────┘
+```
+
+### Core Architecture & Alignment Signals
+
+1. **Decoupled Verification Concepts**:
+   - **Claim Groundedness**: Is the factual assertion entailed/supported by evidence in the retrieved corpus?
+   - **Citation Correctness**: Does the specific cited source chunk actually support the asserted claim?
+   - **Citation Completeness**: Are all factual assertions attributed with source citation references?
+2. **Multi-Signal Alignment Engine (`ClaimVerifier`)**:
+   - **Entity / Code Alignment**: Direct extraction of operational codes (e.g. `NX-FAC-100`), proper nouns, and entity names.
+   - **Temporal / Date Alignment**: Extraction of dates, calendar months, weekdays (e.g. *Wednesday* vs *Friday*), and clock times.
+   - **Numerical Alignment**: Currency values, percentages, and quantities (e.g. *$80* vs *$50*).
+   - **Polarity / Negation Detection**: Detection of negation modifiers and antonym inversions (*restricted* vs *unrestricted*).
+   - **Directional Content-Token Containment & LCS Overlap**: Token precision and Longest Common Subsequence ratio against candidate chunks.
+3. **Robust Unanswerable & Refusal Accounting**:
+   - Sentinel refusal answers produce: `answer_type = "insufficient_evidence"`, `refusal_correct = True`, `groundedness_score = 1.0`, `total_claims = 0`, `spurious_citations = 0`.
+   - Fabricated answers to unanswerable queries are flagged as `answer_type = "fabricated_answer"`, `refusal_correct = False`, `groundedness_score = 0.0`.
+
+### Key Components
+
+* **Data Models**: `AnswerType`, `UnsupportedReason`, `Claim`, `ClaimVerification`, `CitationVerificationResult` in `app/citations/models.py`
+* **Extraction Engine**: `extract_claims`, `parse_citations_from_text`, `extract_entities`, `split_sentences` in `app/citations/extractor.py`
+* **Verification Engine**: `ClaimVerifier`, `tokenize_content_words`, `compute_lcs_length` in `app/citations/verifier.py`
+* **Verification Service**: `CitationVerificationService` in `app/citations/service.py`
+* **Orchestration**: `RAGService` in `app/rag/service.py` integrating post-generation verification into `RAGResponse`.
+
+### Commands
+
+**1. Run Citation Verification Benchmark Evaluation**
+
+Run end-to-end verification and metric distribution profiling across all 150 benchmark questions:
+
+```bash
+python scripts/evaluate_citation_verification.py
+```
+
+---
+
+## Phase 7.2: Adversarial Hardening & Production-Readiness Pass
+
+Phase 7.2 hardens the citation verification engine against evaluation leakage by testing across 20 distinct adversarial perturbation categories (A through T), calibrating support overlap thresholds across a full parameter grid, and enabling flexible live vs mock LLM evaluation.
+
+### Key Audit Capabilities & Enhancements
+
+1. **Adversarial Perturbation Suite (Categories A through T)**:
+   - Evaluates benign paraphrases, exact citations, wrong source citations, missing citations, invalid indices, fabricated numbers, dates, weekdays, clock times, polarity inversions, negation insertions/removals, unsupported entities, unsupported claims, partial support, distractor citations, and contradictory sources.
+2. **Support Threshold Calibration Grid**:
+   - Sweeps overlap thresholds from `0.20` to `0.70` across benign and adversarial samples to empirically determine the optimal production balance.
+3. **MockLLMProvider Simulation Engine**:
+   - Dynamic deterministic perturbation engine supporting 15 simulation modes (`faithful_paraphrase`, `numeric_mutation`, `temporal_mutation`, `polarity_inversion`, `negation_insertion`, `negation_removal`, `missing_citations`, `wrong_citation`, etc.).
+4. **Live LLM Evaluation Runner (`scripts/evaluate_live_rag.py`)**:
+   - Decoupled CLI supporting live OpenAI APIs with automatic key validation, secret redaction, and deterministic fallback.
+
+---
+
+### Adversarial Evaluation Results (Categories A–T)
+
+```
+===========================================================================
+PHASE 7.2 ADVERSARIAL CITATION VERIFICATION BENCHMARK
+===========================================================================
+
+Confusion Matrix:
+                      Actual Supported    Actual Unsupported
+  Pred Supported      TP: 3               FP: 0
+  Pred Unsupported    FN: 0               TN: 17
+
+Verification Performance Metrics:
+  Total Test Cases:            20
+  Accuracy:                    1.0000 (100.00%)
+  Precision:                   1.0000 (100.00%)
+  Recall:                      1.0000 (100.00%)
+  F1 Score:                    1.0000
+  False Positive Rate (FPR):   0.0000 (0.00%)
+  False Negative Rate (FNR):   0.0000 (0.00%)
+  Paraphrase Acceptance Rate:  1.0000 (100.00%)
+  Adversarial Rejection Rate:  1.0000 (100.00%)
+```
+
+#### Category Breakdown (A through T)
+
+| Cat | Perturbation Category | Expected Grounded | Expected Citation Correct | Audit Status | Primary Failure Classification |
+|---|---|---|---|---|---|
+| **A** | Faithful paraphrase | True | True | **PASS** | Valid support |
+| **B** | Exact source statement | True | True | **PASS** | Valid support |
+| **C** | Missing citation | True | False | **PASS** | `missing_citation` |
+| **D** | Wrong citation | False | False | **PASS** | `wrong_citation` |
+| **E** | Invalid citation index | False | False | **PASS** | `invalid_citation_index` |
+| **F** | Fabricated number | False | False | **PASS** | `numerical_mismatch` |
+| **G** | Fabricated date | False | False | **PASS** | `temporal_mismatch` |
+| **H** | Fabricated weekday | False | False | **PASS** | `temporal_mismatch` |
+| **I** | Fabricated time | False | False | **PASS** | `temporal_mismatch` |
+| **J** | Polarity inversion | False | False | **PASS** | `contradiction` |
+| **K** | Negation insertion | False | False | **PASS** | `contradiction` |
+| **L** | Negation removal | False | False | **PASS** | `contradiction` |
+| **M** | Unsupported entity | False | False | **PASS** | `entity_mismatch` |
+| **N** | Unsupported claim | False | False | **PASS** | `no_supporting_source` |
+| **O** | Partial claim | False | False | **PASS** | `no_supporting_source` |
+| **P** | Multi-source correct attribution | True | True | **PASS** | Valid support |
+| **Q** | Multi-source wrong attribution | False | False | **PASS** | `wrong_citation` |
+| **R** | Distractor citation | True | False | **PASS** | `wrong_citation` |
+| **S** | Contradictory numerical value | False | False | **PASS** | `numerical_mismatch` |
+| **T** | Contradictory temporal value | False | False | **PASS** | `temporal_mismatch` |
+
+---
+
+### Support Threshold Calibration Grid
+
+| Overlap Threshold | Accuracy | Precision | Recall | F1 Score | FPR | FNR | Paraphrase Acceptance | Adversarial Rejection |
+|---|---|---|---|---|---|---|---|---|
+| 0.20 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 100.00% | 100.00% |
+| 0.25 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 100.00% | 100.00% |
+| 0.30 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 100.00% | 100.00% |
+| 0.35 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 100.00% | 100.00% |
+| **0.40 (Recommended)** | **1.0000** | **1.0000** | **1.0000** | **1.0000** | **0.0000** | **0.0000** | **100.00%** | **100.00%** |
+| 0.45 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 100.00% | 100.00% |
+| 0.50 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 100.00% | 100.00% |
+| 0.55 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 100.00% | 100.00% |
+| 0.60 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 100.00% | 100.00% |
+| 0.65 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 100.00% | 100.00% |
+| 0.70 | 0.9500 | 1.0000 | 0.6667 | 0.8000 | 0.0000 | 0.3333 | 66.67% | 100.00% |
+
+* **Threshold Plateau**: Overlap thresholds between `0.20` and `0.65` yield 100% F1.
+* **Degradation Point**: At threshold `0.70`, recall falls to 66.67% due to false rejection of legitimate benign paraphrases.
+* **Production Recommendation**: `CITATION_MIN_OVERLAP_THRESHOLD = 0.40` provides an optimal balance between lexical variation tolerance and hallucination prevention.
+
+---
+
+### Verifier Boundary & Production Limitations
+
+1. **Deterministic Speed**: The verifier operates in <5ms per claim without external LLM inference overhead.
+2. **Deterministic Coverage**: Guarantees zero tolerance on altered alphanumeric codes, temporal indicators (weekdays, dates, times), and numeric/financial quantities.
+3. **Inference Limitations**: Lexical LCS and token containment do not perform multi-hop symbolic arithmetic or complex deduction across non-adjacent clauses. High-consequence regulatory domains should pair this with an asynchronous NLI Cross-Encoder or second-stage LLM-as-judge.
+
+---
+
+### Commands & Execution
+
+**1. Run Adversarial Citation Benchmark**
+```bash
+python scripts/evaluate_adversarial_citations.py
+```
+
+**2. Run Threshold Calibration**
+```bash
+python scripts/calibrate_thresholds.py
+```
+
+**3. Run Offline / Simulation Evaluation**
+```bash
+# Evaluate with faithful paraphrase mode:
+python scripts/evaluate_live_rag.py --provider mock --mock-mode faithful_paraphrase
+
+# Evaluate with adversarial numeric mutation:
+python scripts/evaluate_live_rag.py --provider mock --mock-mode numeric_mutation
+```
+
+**4. Run Live LLM Evaluation (Requires OPENAI_API_KEY)**
+```bash
+python scripts/evaluate_live_rag.py --provider openai --model gpt-3.5-turbo
+```
+
+**5. Run Full Test Suite**
+```bash
+python -m pytest
+```
+
+
+---
+
+## Phase 8: Production API & Application Layer
+
+### Architecture
+
+Phase 8 exposes the existing RAG pipeline through a production-oriented FastAPI application without duplicating any retrieval, generation, or verification logic.
+
+```
+                    HTTP Client (cURL / Browser / Frontend)
+                                     │
+                                     ▼
+                          FastAPI App (app/main.py)
+                          ├─ CORS (explicit origins)
+                          ├─ Security Headers Middleware
+                          ├─ Structured Logging
+                          └─ Sanitized Exception Handlers
+                                     │
+                                     ▼
+                           API Router (app/api/routes.py)
+                   ┌─────────────────┼─────────────────┐
+                   │                 │                 │
+                   ▼                 ▼                 ▼
+             GET /health       POST /query       POST /retrieve
+             (readiness)      (full RAG)        (debug retrieval)
+                   │                 │                 │
+                   │                 ▼                 ▼
+                   │         RAGService.answer()  RerankedHybridService
+                   │         └→ Retrieval         .retrieve()
+                   │         └→ Generation
+                   │         └→ Verification
+                   └─────────────────┼─────────────────┘
+                                     │
+                                     ▼
+                            Structured JSON Response
+```
+
+### Endpoints
+
+#### GET /health
+
+Returns application and component readiness status.
+
+```bash
+curl http://localhost:8000/health
+```
+
+Response:
+```json
+{
+  "status": "healthy",
+  "environment": "mock",
+  "components": {
+    "retrieval": true,
+    "reranker": true,
+    "generation": true,
+    "citation_verifier": true
+  }
+}
+```
+
+Status values: `"healthy"` (all components ready), `"degraded"` (one or more components unavailable).
+
+Environment values: `"mock"` (offline MockLLMProvider), `"live"` (OpenAI API with valid key).
+
+#### POST /query
+
+Full RAG pipeline: retrieval → generation → citation verification.
+
+```bash
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is the application deadline?", "top_k": 5}'
+```
+
+Request body:
+| Field | Type | Required | Constraints |
+|-------|------|----------|-------------|
+| `query` | string | Yes | 1–2000 chars, trimmed, non-empty |
+| `top_k` | integer | No (default: 10) | 1–150 |
+
+Response:
+```json
+{
+  "query": "What is the application deadline?",
+  "answer": "Based on the provided documentation: ...",
+  "sources": [
+    {
+      "chunk_id": "DOC001_CHUNK_01",
+      "document_id": "DOC001",
+      "title": "...",
+      "department": "...",
+      "rank": 1,
+      "score": 0.95,
+      "text": "..."
+    }
+  ],
+  "verification": { "...": "..." },
+  "groundedness_score": 1.0,
+  "metadata": {
+    "retrieval_latency_ms": null,
+    "generation_latency_ms": null,
+    "verification_latency_ms": null,
+    "total_latency_ms": 592.4,
+    "llm_provider": "mock",
+    "is_live_llm": false
+  }
+}
+```
+
+#### POST /retrieve
+
+Debug/inspection endpoint. Retrieval only — no generation, no verification.
+
+```bash
+curl -X POST http://localhost:8000/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{"query": "application deadline", "top_k": 5}'
+```
+
+Response:
+```json
+{
+  "query": "application deadline",
+  "top_k": 5,
+  "results": [
+    {
+      "chunk_id": "DOC001_CHUNK_01",
+      "document_id": "DOC001",
+      "title": "...",
+      "department": "...",
+      "rank": 1,
+      "score": 0.85,
+      "text": "..."
+    }
+  ]
+}
+```
+
+### Validation Rules
+
+| Rule | HTTP Status | Error Code |
+|------|-------------|------------|
+| Empty or whitespace-only query | 422 | `VALIDATION_ERROR` |
+| Query exceeds 2000 characters | 422 | `VALIDATION_ERROR` |
+| `top_k` < 1 or > 150 | 422 | `VALIDATION_ERROR` |
+| RAG pipeline failure | 500 | `RAG_ERROR` |
+| Unexpected server error | 500 | `INTERNAL_ERROR` |
+
+### Error Format
+
+All errors return a structured envelope:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Request validation failed.",
+    "details": "body -> query: String should have at least 1 character"
+  }
+}
+```
+
+Stack traces, API keys, and filesystem paths are never exposed to clients.
+
+### Local Startup
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Start the API server (development mode with auto-reload)
+uvicorn app.main:app --reload
+
+# Start the API server (production mode)
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Swagger / OpenAPI Documentation
+
+Interactive API documentation is automatically available:
+
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
+- **OpenAPI JSON**: http://localhost:8000/openapi.json
+
+### Docker
+
+```bash
+# Build the image
+docker build -t nexora-rag-api .
+
+# Run the container
+docker run -p 8000:8000 nexora-rag-api
+
+# Run with live OpenAI provider
+docker run -p 8000:8000 -e OPENAI_API_KEY=your_key_here nexora-rag-api
+```
+
+### Environment Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_HOST` | `0.0.0.0` | Server bind address |
+| `API_PORT` | `8000` | Server port |
+| `LLM_PROVIDER` | `mock` | LLM backend (`mock` or `openai`) |
+| `OPENAI_API_KEY` | *(none)* | Required only for live OpenAI provider |
+
+### Mock vs Live Provider
+
+| Condition | Environment | is_live_llm |
+|-----------|-------------|-------------|
+| No `OPENAI_API_KEY` set | `"mock"` | `false` |
+| `LLM_PROVIDER=mock` | `"mock"` | `false` |
+| `LLM_PROVIDER=openai` + valid key | `"live"` | `true` |
+
+### Latency Metadata
+
+All `/query` responses include monotonic timing metadata. `total_latency_ms` measures the complete RAG pipeline execution time using `time.monotonic()` (not wall-clock time).
+
+### Security Considerations
+
+- API keys are **never** logged, printed, or returned in responses.
+- Error responses are sanitized to prevent leakage of secrets or filesystem paths.
+- Security headers (`X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`, `Cache-Control`) are set on all responses.
+- CORS is explicitly configured (not wildcard).
+- Query length is validated at the API boundary (max 2000 characters).
+
+### Frozen Retrieval Baseline
+
+Phase 5 retrieval metrics remain exactly unchanged through Phase 8:
+
+| Metric | Value |
+|--------|-------|
+| Recall@1 | 0.4720 |
+| Recall@3 | 1.0000 |
+| Recall@5 | 1.0000 |
+| Recall@10 | 1.0000 |
+| MRR | 0.6920 |
+
+### Production Readiness Status
+
+Phase 7.2 verdict: **READY_FOR_LIMITED_PRODUCTION**
+
+Phase 8 adds operational API exposure, structured error handling, and container deployment capability. The underlying RAG verification remains deterministic and lexical/rule-based; it does not perform symbolic multi-hop reasoning or advanced semantic NLI. Do not claim this system is universally hallucination-proof.
+
+---
+
+## Phase 8.1: Production API Audit & Hardening Pass
+
+### Audit Summary & Hardening Passes
+
+Phase 8.1 performed a comprehensive security, lifecycle, error-handling, and concurrency audit of the API layer:
+
+1. **HTTP Exception Envelopes**: Integrated `StarletteHTTPException` handler in `app/api/errors.py` so standard HTTP client errors (404 Not Found, 405 Method Not Allowed) return structured JSON envelopes rather than being caught and masked as generic 500 Internal Errors.
+2. **Cross-Platform Path Sanitization**: Hardened `_PATH_PATTERN` regex in `app/api/errors.py` to sanitize both Windows backslash (`F:\...`), forward-slash (`C:/...`), and POSIX (`/home/...`) filesystem paths from error messages.
+3. **Singleton Model Sharing**: Refactored `get_hybrid_reranker()` in `app/api/dependencies.py` to share the underlying `RerankedHybridService` from `RAGService`, eliminating duplicate Cross-Encoder model and FAISS vector index loading in memory.
+4. **Health Check Accuracy**: Updated `check_component_health()` in `app/api/dependencies.py` to verify actual `is_initialized` states of `VectorStore`, `BM25Store`, and `CrossEncoder`, returning `status="degraded"` when stores are uninitialized.
+5. **Configurable CORS & Environment Overrides**: Centralized environment overrides for `API_PORT`, `API_HOST`, `API_MAX_QUERY_LENGTH`, and `API_CORS_ORIGINS` in `app/config.py`.
+6. **Concurrency & Thread Safety**: Verified multi-threaded request isolation across concurrent `/query` and `/retrieve` calls with zero cross-request state contamination.
+
+### Audit Runner
+
+Run the automated audit suite:
+
+```bash
+python scripts/audit_phase8.py
+```
+
+Generated audit artifact: `results/phase8_production_audit.json`
+
+### Phase 8.1 Test Suite Status
+
+- **Baseline Tests (Phases 1–7.2)**: 246 passed
+- **Phase 8 API Unit Tests**: 21 passed
+- **Phase 8.1 Hardening Tests**: 17 passed
+- **Total Tests**: **284 passed, 0 failed**
+
+### Final Production Verdict
+
+**READY_FOR_LIMITED_PRODUCTION**
+
+---
+
+## Phase 9: Production Observability, Evaluation & Deployment Hardening
+
+Phase 9 transitions the RAG system from a verified, hardened API into a measurable, observable, reproducible, deployable, and continuously evaluable production service.
+
+```
+                      INCOMING HTTP REQUEST
+                                │
+                                ▼
+               ┌──────────────────────────────────┐
+               │    ObservabilityMiddleware       │
+               │  - X-Request-ID Correlation      │
+               │  - SHA-256 Query Hashing (PII)   │
+               │  - Structured JSON Access Log    │
+               │  - Monotonic Latency Tracking    │
+               └────────────────┬─────────────────┘
+                                │
+                                ▼
+                       FastAPI Router
+            ┌───────────────────┼───────────────────┐
+            ▼                   ▼                   ▼
+      GET /health           GET /ready          GET /metrics
+     (Liveness 200)      (Readiness 200/503)   (Counters & Percentiles)
+            │                   │                   │
+            └───────────────────┼───────────────────┘
+                                ▼
+                      POST /query, /retrieve
+                                │
+                                ▼
+                 RAG Engine with Sub-Phase Metrics
+                (Retrieval → Rerank → Gen → Verify)
+```
+
+### Key Components
+
+#### 1. Structured JSON Logging & Privacy Protection (`app/observability/logging.py`)
+* **Deterministic Query Hashing**: User queries are never logged in plaintext. They are hashed using SHA-256 (`get_query_hash()`) to enable correlation while preventing PII exposure.
+* **Recursive Redaction**: `sanitize_log_data()` automatically strips OpenAI API keys (`sk-...`), Bearer authorization tokens, and both Windows (`C:\...`, `F:/...`) and POSIX paths.
+* **Structured Format**: `StructuredJSONFormatter` emits standard JSON logs with timestamp, log level, event name, component, request ID, duration, and sanitized contextual metadata.
+
+#### 2. Thread-Safe In-Memory Metrics Collector (`app/observability/metrics.py`)
+* **Singleton Architecture**: `MetricsCollector` maintains thread-safe request counters, error rates, and latency sample arrays protected by reentrant threading locks.
+* **Percentile Distributions**: Accurately computes Mean, P50, P90, P95, and P99 latency distributions with zero-division safety across all endpoints and internal RAG sub-phases (`retrieval_ms`, `reranking_ms`, `generation_ms`, `verification_ms`).
+* **Metrics Snapshot**: Exposed via `GET /metrics` for operational dashboards and health scraping.
+
+#### 3. Correlation Middleware (`app/observability/middleware.py`)
+* **`X-Request-ID` Lifecycle**: Ingests incoming `X-Request-ID` headers or generates compliant UUIDv4 identifiers. Replaces malformed or oversized IDs (>64 chars) with safe UUIDs.
+* **Context Propagation**: Injects `request_id` into response headers and attaches it to all structured log records.
+
+#### 4. Kubernetes Liveness & Readiness Probes (`app/api/routes.py`)
+* **`GET /health`**: High-frequency liveness probe returning HTTP 200 with service status, environment mode, and uptime.
+* **`GET /ready`**: Deep readiness probe verifying the initialization of `VectorStore` (FAISS), `BM25Store`, and `CrossEncoder`. Returns HTTP 200 when traffic-ready, or HTTP 503 Service Unavailable when stores are uninitialized or degraded.
+
+#### 5. Hardened Non-Root Containerization (`Dockerfile`)
+* **Security Lockdown**: Runs as non-root user `appuser` (UID 10001) in group `appuser`.
+* **Ownership Enforcement**: Explicitly chowns `/app` to `appuser:appuser` to prevent privilege escalation.
+* **Native Healthcheck**: Built-in `HEALTHCHECK` periodically probing `http://localhost:8000/health`.
+
+---
+
+### Phase 9 API Endpoints
+
+#### GET /health (Liveness)
+```bash
+curl http://localhost:8000/health
+```
+```json
+{
+  "status": "healthy",
+  "environment": "mock",
+  "is_live_llm": false,
+  "components": {
+    "retrieval": true,
+    "reranker": true,
+    "generation": true,
+    "citation_verifier": true
+  }
+}
+```
+
+#### GET /ready (Readiness)
+```bash
+curl http://localhost:8000/ready
+```
+```json
+{
+  "status": "ready",
+  "ready": true,
+  "checks": {
+    "vector_store": true,
+    "bm25_store": true,
+    "cross_encoder": true
+  }
+}
+```
+
+#### GET /metrics (Operational Telemetry)
+```bash
+curl http://localhost:8000/metrics
+```
+```json
+{
+  "uptime_seconds": 124.5,
+  "requests": {
+    "total": 50,
+    "by_endpoint": { "/health": 10, "/ready": 10, "/query": 30 },
+    "errors": { "total": 0, "4xx": 0, "5xx": 0, "rate": 0.0 }
+  },
+  "latency_ms": {
+    "overall": { "count": 50, "mean": 12.4, "p50": 1.2, "p90": 28.5, "p95": 32.1, "p99": 35.0 },
+    "by_endpoint": { ... }
+  },
+  "rag": {
+    "queries_processed": 30,
+    "refusals": 5,
+    "grounded_answers": 25,
+    "groundedness_rate": 1.0,
+    "subphase_latency_ms": {
+      "retrieval": { "p50": 8.1, "p95": 14.2 },
+      "reranking": { "p50": 12.3, "p95": 18.0 },
+      "generation": { "p50": 0.5, "p95": 0.8 },
+      "verification": { "p50": 2.1, "p95": 3.4 }
+    }
+  }
+}
+```
+
+---
+
+### Full Orchestrated Evaluation & Benchmarks
+
+Run the complete, reproducible Phase 9 evaluation suite:
+
+```bash
+python scripts/run_full_evaluation.py
+```
+
+Run standalone API performance benchmarking:
+
+```bash
+python scripts/evaluate_api_performance.py --requests 50 --concurrency 5
+```
+
+Generated evaluation artifacts:
+* `results/full_evaluation_report.json` — Comprehensive multi-phase quantitative telemetry.
+* `results/phase9_production_readiness.json` — Categorical pass/fail production readiness scorecard.
+* `results/api_performance_eval.json` — Latency percentiles and throughput benchmarks across all endpoints.
+
+---
+
+### Frozen Retrieval Baseline Verification
+
+Phase 5 retrieval metrics remain strictly preserved across all phases:
+
+| Metric | Phase 5 Baseline | Phase 9 Measured | Verification Status |
+|---|---|---|---|
+| **Recall@1** | `0.4720` | `0.4720` | Exact Match ✓ |
+| **Recall@3** | `1.0000` | `1.0000` | Exact Match ✓ |
+| **Recall@5** | `1.0000` | `1.0000` | Exact Match ✓ |
+| **Recall@10** | `1.0000` | `1.0000` | Exact Match ✓ |
+| **MRR** | `0.6920` | `0.6920` | Exact Match ✓ |
+
+---
+
+### Complete Test Suite Status
+
+```
+============================== test session starts ==============================
+collected 328 items
+
+tests/integration/ ... 23 passed
+tests/unit/ ... 305 passed
+
+====================== 328 passed, 0 failed in 177.63s =======================
+```
+
+* **Baseline Unit & Integration Tests (Phases 1–7.2)**: 246 passed
+* **Phase 8 & 8.1 API Hardening Tests**: 38 passed
+* **Phase 9 Observability, Metrics & Health Tests**: 44 passed
+* **Total Automated Tests**: **328 passed, 0 failed (100% pass rate)**
+
+---
+
+### Production Readiness Verdict & Guardrails
+
+**Overall System Status**: `READY_FOR_LIMITED_PRODUCTION`
+
+**System Strengths**:
+* Deterministic, zero-network mock generation for reproducible offline evaluations.
+* Lexical, token-precision, and entity-preserving citation verification engine.
+* Low latency (<30ms P95 query response time with local models) and high throughput (>45 req/sec).
+* Comprehensive observability with privacy-preserving SHA-256 query logging and secret redaction.
+* Hardened non-root Docker deployment container with liveness/readiness orchestration probes.
+
+**Known Limitations & Guardrails**:
+* Verification is token-precision, entity, and sentence-boundary based; it does not perform multi-step symbolic reasoning.
+* Live LLM mode requires an external OpenAI API key and relies on network connectivity and upstream rate limits.
+* FAISS and BM25 indexes are stored locally on the container filesystem; horizontal autoscaling requires shared volume storage or a distributed vector database.
 

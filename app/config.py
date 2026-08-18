@@ -8,7 +8,9 @@ regardless of the working directory.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from typing import List
 
 # ---------------------------------------------------------------------------
 # Repository root — the parent of this file's package hierarchy
@@ -97,8 +99,80 @@ RAG_MIN_RELEVANCE_SCORE: float = 0.0
 
 
 # ---------------------------------------------------------------------------
+# Phase 7: Citation Verification & Answer Groundedness
+# ---------------------------------------------------------------------------
+
+#: Baseline minimum lexical/content-token overlap score required for claim support.
+CITATION_MIN_OVERLAP_THRESHOLD: float = 0.40
+
+#: Baseline entity/number/date match threshold (1.0 = strict 100% entity containment).
+CITATION_ENTITY_MATCH_THRESHOLD: float = 1.0
+
+#: Strict mode flag for citation verification warnings.
+CITATION_STRICT_MODE: bool = False
+
+
+# ---------------------------------------------------------------------------
 # Results directory
 # ---------------------------------------------------------------------------
 
 #: Directory where evaluation result JSON files are written.
 RESULTS_DIR: Path = _REPO_ROOT / "results"
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 & 9: Production API, Observability & Deployment Configuration
+# ---------------------------------------------------------------------------
+
+
+def _get_env_int(key: str, default: int, min_val: int | None = None, max_val: int | None = None) -> int:
+    """Safely parse integer environment variables with boundary checks and fallback."""
+    val = os.getenv(key)
+    if val is None:
+        return default
+    try:
+        parsed = int(val.strip())
+        if min_val is not None and parsed < min_val:
+            return default
+        if max_val is not None and parsed > max_val:
+            return default
+        return parsed
+    except (ValueError, TypeError):
+        return default
+
+
+def _get_env_list(key: str, default: List[str]) -> List[str]:
+    """Safely parse comma-separated string environment variables into a list."""
+    val = os.getenv(key)
+    if not val:
+        return default
+    items = [item.strip() for item in val.split(",") if item.strip()]
+    return items if items else default
+
+
+#: Host address for the FastAPI/Uvicorn server.
+API_HOST: str = os.getenv("API_HOST", "0.0.0.0").strip()
+
+#: Port for the FastAPI/Uvicorn server.
+API_PORT: int = _get_env_int("API_PORT", default=8000, min_val=1, max_val=65535)
+
+#: Application title shown in OpenAPI/Swagger documentation.
+API_TITLE: str = os.getenv("API_TITLE", "Nexora RAG API").strip()
+
+#: API version string.
+API_VERSION: str = os.getenv("API_VERSION", "1.0.0").strip()
+
+#: Maximum allowed query string length (characters).
+API_MAX_QUERY_LENGTH: int = _get_env_int("API_MAX_QUERY_LENGTH", default=2000, min_val=1, max_val=100000)
+
+#: Allowed CORS origins.
+API_CORS_ORIGINS: List[str] = _get_env_list(
+    "API_CORS_ORIGINS", default=["http://localhost:3000", "http://localhost:8000"]
+)
+
+#: Application logging level (e.g., DEBUG, INFO, WARNING, ERROR).
+LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper().strip()
+
+#: Enable or disable in-memory metrics collection.
+METRICS_ENABLED: bool = os.getenv("METRICS_ENABLED", "true").lower().strip() in ("true", "1", "yes")
+

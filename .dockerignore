@@ -1,0 +1,64 @@
+# Version control
+.git
+.gitignore
+
+# Python caches
+__pycache__
+*.py[cod]
+*$py.class
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Virtual environments
+.venv
+venv
+env
+ENV
+
+# IDE/Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Notebooks and documentation (not needed at runtime)
+notebooks
+docs
+
+# Temporary files
+tmp
+temp
+*.log
+*.tmp
+*.bak
+
+# Build artifacts
+dist
+build
+*.egg-info
+
+# Environment secrets (should be injected at runtime)
+.env
+.env.local
+.env.*.local
+
+# Model caches (downloaded at runtime or mounted)
+.cache
+huggingface
+torch
+models
+
+# Results (generated, not needed for serving)
+results
+
+# Tests (not needed in production image)
+tests
+pytest.ini

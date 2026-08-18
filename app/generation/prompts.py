@@ -74,3 +74,42 @@ def build_grounded_prompt(query: str, formatted_context: str) -> str:
         f"{query}\n\n"
         f"=== ANSWER ==="
     )
+
+
+CITED_SYSTEM_PROMPT = (
+    "You are a strict, factual RAG assistant for Nexora documentation.\n"
+    "Your objective is to answer the user query accurately using ONLY the provided context sources.\n\n"
+    "CRITICAL GROUNDEDNESS & CITATION RULES:\n"
+    "1. Base your answer strictly on the provided Context Sources below.\n"
+    "2. Attach inline citations like [Source 1] or [Source 2] to every factual statement.\n"
+    "3. Do NOT invent, assume, or extrapolate facts not explicitly stated in the context.\n"
+    "4. If the context does NOT contain sufficient evidence to answer the question, state explicitly:\n"
+    "   'I do not have sufficient information in the provided context to answer this question.'\n"
+    "5. Keep your answer factual, precise, and concise."
+)
+
+
+def build_cited_grounded_prompt(query: str, formatted_context: str) -> str:
+    """Combine cited system guidelines, context blocks, and query into a citation-instructed prompt.
+
+    Parameters
+    ----------
+    query : str
+        User query text.
+    formatted_context : str
+        Formatted context text block.
+
+    Returns
+    -------
+    str
+        Full prompt ready for LLM consumption with citation instructions.
+    """
+    return (
+        f"{CITED_SYSTEM_PROMPT}\n\n"
+        f"=== CONTEXT SOURCES ===\n"
+        f"{formatted_context}\n\n"
+        f"=== USER QUERY ===\n"
+        f"{query}\n\n"
+        f"=== ANSWER ==="
+    )
+

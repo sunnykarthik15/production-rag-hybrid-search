@@ -101,9 +101,66 @@ class TestGenerationService:
         assert "Source context text." in prompt
         assert "What is X?" in prompt
 
+    def test_mock_provider_citation_generation_mode(self) -> None:
+        """MockLLMProvider with include_citations=True attaches [Source 1] citations."""
+        provider = MockLLMProvider(include_citations=True)
+        service = GenerationService(provider=provider)
+
+        context = ["[Source 1]\nDocument ID: DOC001\nChunk ID: C1\nTitle: Library\nDepartment: Ops\nContent:\nLibrary hours are 9 AM to 5 PM."]
+        response = service.generate("What are library hours?", context)
+
+        assert isinstance(response, GenerationResponse)
+        assert "[Source 1]" in response.answer
+        assert "Library hours are 9 AM to 5 PM" in response.answer
+
+    def test_mock_provider_detects_source_rank_from_context(self) -> None:
+        """MockLLMProvider accurately preserves source rank header from context chunk."""
+        provider = MockLLMProvider(include_citations=True)
+        service = GenerationService(provider=provider)
+
+        context = ["[Source 3]\nDocument ID: DOC003\nChunk ID: C3\nTitle: Parking\nDepartment: Security\nContent:\nParking permits cost $50 annually."]
+        response = service.generate("What is the permit fee?", context)
+
+        assert "[Source 3]" in response.answer
+        assert "$50" in response.answer
+
     def test_openai_provider_missing_key_raises_error(self) -> None:
         """OpenAILLMProvider raises GenerationError if OPENAI_API_KEY is missing."""
         provider = OpenAILLMProvider(api_key="")
 
         with pytest.raises(GenerationError, match="OPENAI_API_KEY"):
             provider.generate("prompt", "query", ["context"])
+
+    @pytest.mark.parametrize(
+        "mode,expected_check",
+        [
+            ("faithful_paraphrase", lambda ans: "operational schedule" in ans or "service hours" in ans or "[Source 1]" in ans),
+            ("missing_citations", lambda ans: "[Source" not in ans),
+            ("wrong_citation", lambda ans: "[Source 2]" in ans),
+            ("invalid_citation", lambda ans: "[Source 99]" in ans),
+            ("fabricated_number", lambda ans: "$80.00" in ans or "$250" in ans or "85" in ans),
+            ("fabricated_date", lambda ans: "Dec 15" in ans or "2029" in ans or "Jan 28" in ans),
+            ("fabricated_weekday", lambda ans: "Wednesday" in ans or "Thursday" in ans),
+            ("fabricated_time", lambda ans: "10 PM" in ans or "11 AM" in ans or "11:30" in ans),
+            ("polarity_inversion", lambda ans: "unrestricted" in ans or "prohibited" in ans or "optional" in ans),
+            ("negation_insertion", lambda ans: "not" in ans.lower()),
+            ("negation_removal", lambda ans: "permitted" in ans or "unrestricted" in ans or "allowed" in ans or "requires" in ans or "with" in ans),
+            ("unsupported_claim", lambda ans: "Quantum propulsion" in ans),
+            ("unsupported_entity", lambda ans: "NX-SEC-999" in ans or "NX-MUT-999" in ans or "NX-ENG-404" in ans),
+            ("multi_source_misattribution", lambda ans: "[Source 2]" in ans and "[Source 1]" in ans),
+        ],
+    )
+    def test_mock_provider_simulation_modes(self, mode: str, expected_check: Any) -> None:
+        """Verify each simulation mode alters the generated text deterministically."""
+        provider = MockLLMProvider(include_citations=True, mode=mode)
+        service = GenerationService(provider=provider)
+
+        context = [
+            "[Source 1]\nDocument ID: DOC001\nChunk ID: C1\nTitle: Library\nDepartment: Ops\nContent:\nThe library operating hours are 9 AM to 5 PM Friday under module NX-FAC-100 costing $50. Access is restricted.",
+            "[Source 2]\nDocument ID: DOC002\nChunk ID: C2\nTitle: Parking\nDepartment: Security\nContent:\nVisitor parking is prohibited without permits.",
+        ]
+        response = service.generate("What are library hours and fees?", context)
+
+        assert isinstance(response, GenerationResponse)
+        assert expected_check(response.answer), f"Mode '{mode}' failed check on answer: {response.answer}"
+
